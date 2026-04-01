@@ -6,6 +6,7 @@
 *.h5
 *.json
 *.pkl
+*.ply
 
 # Developing Files
 *.ipynb
