@@ -35,4 +35,3 @@ class Task1:
         Activation = True
         Maker = True
         Destroyer = False
-        Version = 0
