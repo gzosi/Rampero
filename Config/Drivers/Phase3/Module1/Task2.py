@@ -19,7 +19,7 @@ class Task2:
         ConfLimit = 0
         SimLimit = 0.5
     class General:
-        Activation = True
+        Activation = False
         Maker = True
         Destroyer = False
         Version = 0
