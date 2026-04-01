@@ -8,27 +8,26 @@ class Task1:
     class Settings:
         class Rotation:
             Camera1 = None
-            Camera2 = cv.ROTATE_180
-            # cv.ROTATE_90_CLOCKWISE, cv.ROTATE_180, cv.ROTATE_90_COUNTERCLOCKWISE 
+            Camera2 = None
         class Resync:
             class Database2:
-                Dataset1 = 7
+                Dataset1 = 67
             class Database3: 
-                class Dataset2:
-                    Background = 24
-                    Foreground = 25
+                class Dataset4:
+                    Background = 16
+                    Foreground = 22
             class Database4:
-                Dataset1 = 30
-                Dataset2 = 4
-                Dataset3 = 21
-                Dataset4 = 41
-                Dataset5 = 23
-                Dataset6 = 32
-                Dataset7 = 59
-                Dataset8 = 15
-                Dataset9 = 12
-                Dataset10 = 55
-                Dataset11 = 34
+                Dataset1 = 16
+                Dataset2 = 32
+                Dataset3 = 36
+                Dataset4 = 31
+                Dataset5 = 1
+                Dataset6 = 36
+                Dataset7 = 4
+                Dataset8 = 37
+                Dataset9 = 56
+                Dataset10 = 15
+                Dataset11 = 0
     class General:
         Activation = True
         Maker = True

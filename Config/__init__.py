@@ -7,7 +7,7 @@ from .Media import Media
 class Config:
     class Settings:
         class CaseStudy:
-            Prop = 'Prop2'
+            Prop = 'Prop1'
             Pov = 'Pov1'
             Kt = 'Kt1'
             Sigma = 'Sigma1'
