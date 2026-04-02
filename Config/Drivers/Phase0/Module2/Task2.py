@@ -8,7 +8,7 @@ class Task2:
         IncludeOrigin = True 
         FullSensorShape = (1280, 800)
     class General:
-        Activation = True
+        Activation = False
         Maker = True
         Destroyer = False
         Version = 0

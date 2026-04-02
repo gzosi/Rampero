@@ -76,7 +76,7 @@ class Task1:
             Smaller = 0.75
             Similar = 0.9
     class General:
-        Activation = True
+        Activation = False
         Maker = True
         Destroyer = False
         Version = 0

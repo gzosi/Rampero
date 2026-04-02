@@ -5,7 +5,7 @@ class Task3:
         MeshExt = 'Mesh.ply'
     class Settings:
         class Calib:
-            Dataset = 'Dataset1'
+            Dataset = 'Dataset4'
             Pair = ('Camera1', 'Camera2')
             Model = 'Model27'
         Bounds = [(0, 255)]
