@@ -57,7 +57,7 @@ class Task1:
                 40 : np.array([
                     [217, 349], [126, 386], [40, 390], 
                     [11, 230], [94, 215], [156, 246]]),
-}
+            }
         class Segmenter: 
             Model = 'SamHq'
             Checkpoint = 'sam_hq_vit_h.pth'
@@ -73,4 +73,4 @@ class Task1:
         Activation = True
         Maker = True
         Destroyer = False
-        Version = 0
+        Version = 0         

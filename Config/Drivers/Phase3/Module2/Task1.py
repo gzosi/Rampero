@@ -9,10 +9,13 @@ class Task1:
             Dataset = 'Dataset1'
             Pair = ('Camera1', 'Camera2')
             Model = 'Model27'
+        class Filters:
+            k = 10
+            std_multiplier = 1.5
         occupancyLimit = 2 #2
         resolution = 0.25
     class General:
-        Activation = False
+        Activation = True
         Maker = True
         Destroyer = False
         Version = 0

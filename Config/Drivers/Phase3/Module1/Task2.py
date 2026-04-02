@@ -15,7 +15,7 @@ class Task2:
             Dataset = 'Dataset1'
             Pair = ('Camera1', 'Camera2')
             Model = 'Model27'
-        EpiLimit = 25
+        EpiLimit = 100000
         ConfLimit = 0
         SimLimit = 0.5
     class General:

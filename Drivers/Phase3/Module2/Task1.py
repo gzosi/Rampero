@@ -28,7 +28,7 @@ def surfaceCarver(masks, calib, pose, occupancyLimit):
     filled = []
     for i, mask in enumerate(masks):
         imgH, imgW = mask.shape
-        ys, xs = np.where(mask == True)
+        ys, xs = np.where(mask > 0)
         points = np.stack([xs, ys], axis=-1)  # (N, 2)
         zero = np.zeros_like(mask, dtype=np.uint8)
         if points.size > 0:
@@ -51,6 +51,7 @@ def surfaceCarver(masks, calib, pose, occupancyLimit):
             P = calib['K1'] @ np.hstack((np.eye(3), np.zeros((3, 1))))
         else: 
             P = calib['K2'] @ np.hstack((calib['R'], calib['T']))
+            
         if P is None or P.size == 0:
             raise ValueError(f"Missing Matrix P{i+1}")
         uvs = P @ poseH.T
@@ -63,7 +64,7 @@ def surfaceCarver(masks, calib, pose, occupancyLimit):
         fill = np.zeros(uvs.shape[1])
         sub_uvs = uvs[:2, indices]
         fill[indices] = zero[sub_uvs[1, :], sub_uvs[0, :]]
-        filled.append(fill)
+        filled.append(fill) 
     filled = np.vstack(filled)
     occupancy = np.sum(filled, axis=0)
     good_mask = occupancy >= occupancyLimit
@@ -72,9 +73,7 @@ def surfaceCarver(masks, calib, pose, occupancyLimit):
     good_points = poseH[good_indices, :][:, :3]
     return good_indices, good_points
 def validatePoints(pts, refPts):
-    """
-    Filtra i punti esterni mantenendo solo quelli "davanti" alla pose.
-    """
+    """ Filtra i punti esterni mantenendo solo quelli "davanti" alla pose. """
     if len(pts) == 0 or len(refPts) == 0:
         return np.empty((0, 3))
     planar_axes = [0, 1] 
@@ -86,6 +85,23 @@ def validatePoints(pts, refPts):
     valid_mask = ~np.isnan(z_surface_at_target)
     front_mask = target_z < z_surface_at_target
     return pts[valid_mask & front_mask]
+def removeOutliers(pts, k=10, std_multiplier=1.5):
+    """
+    Filtra gli outlier statistici basandosi sulla distanza media dai k-vicini (SOR).
+    I punti isolati avranno una distanza media maggiore e verranno scartati.
+    """
+    if len(pts) < k + 1:
+        return pts
+    tree = cKDTree(pts)
+    dists, _ = tree.query(pts, k=k+1)
+    mean_dists = np.mean(dists[:, 1:], axis=1)
+    global_mean = np.mean(mean_dists)
+    global_std = np.std(mean_dists)
+    threshold = global_mean + std_multiplier * global_std
+    filtered_pts = pts[mean_dists < threshold]
+    if len(filtered_pts) < 6:
+        return pts
+    return filtered_pts
 def smoothSurface(pts, grid_x, grid_y):
     """
     Approssima i punti sparsi con una superficie matematica (quadratica o piana).
@@ -105,11 +121,14 @@ def generateVolume(upperSurf, lowerSurf, resolution=1.0):
     """
     Genera il volume calcolato tramite Fit Polinomiale e crea una Voxel Mesh 3D solida.
     """
-    if len(upperSurf) == 0 or len(lowerSurf) == 0:  
-        print("\nAttenzione: Una delle nuvole di punti è vuota.")
+    # Controllo di sicurezza: Qhull (usato in griddata) necessita di almeno 4 punti per la triangolazione
+    if len(upperSurf) < 4 or len(lowerSurf) < 4:  
+        print(f"\nAttention: Not enough points for the triangualtion (upper: {len(upperSurf)}, lower: {len(lowerSurf)}). Skip...")
         return 0.0, None, None
     min_x, max_x = np.min(lowerSurf[:, 0]), np.max(lowerSurf[:, 0])
     min_y, max_y = np.min(lowerSurf[:, 1]), np.max(lowerSurf[:, 1])
+    if max_x - min_x < resolution or max_y - min_y < resolution:
+        return 0.0, None, None
     grid_x, grid_y = np.mgrid[min_x:max_x:resolution, min_y:max_y:resolution]
     lower_z_grid = griddata(lowerSurf[:, :2], lowerSurf[:, 2], (grid_x, grid_y), method='linear')
     nx, ny = grid_x.shape
@@ -161,6 +180,7 @@ def dataCollector(masks, pts, calib, pose, areas, settings):
     pts1, pts2 = pts
     pts3d = triangulationEngine(pts1, pts2, calib)
     valid3d = validatePoints(pts3d, pose)
+    valid3d = removeOutliers(valid3d, k=settings.Filters.k, std_multiplier=settings.Filters.std_multiplier)
     id, inPts = surfaceCarver([mask1, mask2], calib, pose, settings.occupancyLimit)
     area = sum(areas[id]) 
     volume, mesh, exPts = generateVolume(valid3d, inPts, settings.resolution)
@@ -179,8 +199,8 @@ def main(Config):
             Config.Packages.Drivers.__name__ / 
             Config.Packages.Drivers.Phases.Phase2.__name__ / 
             Config.Packages.Drivers.Phases.Phase2.Modules.Module2.__name__ / 
-            Config.Packages.Drivers.Phases.Phase2.Modules.Module2.Tasks.Task3.__name__ / 
-            Config.Packages.Drivers.Phases.Phase2.Modules.Module2.Tasks.Task3.MetaData.OutputExt)
+            Config.Packages.Drivers.Phases.Phase2.Modules.Module2.Tasks.Task4.__name__ / 
+            Config.Packages.Drivers.Phases.Phase2.Modules.Module2.Tasks.Task4.MetaData.OutputExt)
         objRoot = (
             main_root / 
             Config.Paths.DataRoots.ResourcesRoot / 
@@ -210,16 +230,16 @@ def main(Config):
             Config.Packages.Drivers.Phases.Phase3.Modules.Module2.__name__ /
             Config.Packages.Drivers.Phases.Phase3.Modules.Module2.Tasks.Task1.__name__ )
         settings = task_conf.Settings
-        period = Config.Settings.Acquisition.PPR / Config.Settings.Acquisition.Blades
+        period = Config.Settings.Acquisition.PPR
         calib = pd.read_pickle(calibRoot)[settings.Calib.Dataset][settings.Calib.Pair][settings.Calib.Model]
-        poses = pd.read_pickle(poseRoot)
+        poses, areas = [pd.read_pickle(poseRoot)[k ] for k in ['points', 'areas']]
         files = sorted(f.name for f in objRoot.iterdir() if f.is_file())
         cavityData, cloudData = dict(), dict()
         try:
-            for _, name in enumerate(tqdm(files, total=len(files), desc=colored(f'Surface Carving 🚀', 'magenta'), ncols=100)):  
+            for _, name in enumerate(tqdm(files, total=len(files), desc=colored(f'Surface Carving 🚀', 'magenta'), ncols=100)): 
                 key = ''.join(c for c in name if c.isdigit())
                 phase = int(key) % period 
-                pose, areas = poses[phase]
+                pose = poses[phase]
                 cavityData[key] = pd.DataFrame(
                     columns=['Inner', 'Outer', 'Control', 'Mesh', 'Area', 'Volume'])
                 cloudData[key] = pd.DataFrame(

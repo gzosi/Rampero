@@ -63,6 +63,17 @@ def getConnection(simLimit, idx1, idx2):
         score = connection[i, j]
         if score >= simLimit: bestCons.append([i, j, score])
     return bestCons
+def applyTexturedMask(img, mask):
+    ''' 
+    Applica la maschera all'immagine grayscale. 
+    Mantiene il background a 0 e forza i pixel neri (0) DENTRO la maschera al valore 1.
+    '''
+    bool_mask = mask > 0
+    result = np.zeros_like(img)
+    result[bool_mask] = img[bool_mask]
+    zeros_in_mask = bool_mask & (img == 0)
+    result[zeros_in_mask] = 1
+    return result
 #%% Defining Main Function
 def main(Config):       
     task_conf = Config.Packages.Drivers.Phases.Phase3.Modules.Module1.Tasks.Task2
@@ -167,11 +178,15 @@ def main(Config):
                         commonCloud = list(set(inCloudIdx1[i]) & set(inCloudIdx2[j]))
                         cavityMatched1, cavityMatched2 = kpts1[commonCavity], kpts2[commonCavity]
                         cloudMatched1, cloudMatched2 = kpts1[commonCloud], kpts2[commonCloud]
+                        texCavity1 = applyTexturedMask(img1, padCavities1[i])
+                        texCloud1  = applyTexturedMask(img1, padClouds1[i])
+                        texCavity2 = applyTexturedMask(img2, padCavities2[j])
+                        texCloud2  = applyTexturedMask(img2, padClouds2[j])
                         data.at[k, cameras[0]] = [
-                            padCavities1[i], padClouds1[i],
+                            texCavity1, texCloud1,
                             cavityMatched1, cloudMatched1]
                         data.at[k, cameras[1]] = [
-                            padCavities2[j], padClouds2[j], 
+                            texCavity2, texCloud2, 
                             cavityMatched2, cloudMatched2]
                     dst = (dstRoot / f'{task_conf.MetaData.OutputName}_{key}{task_conf.MetaData.OutputExt}')
                     pickle.dump(data, open(dst, 'wb'))
