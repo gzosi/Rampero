@@ -9,6 +9,9 @@ class Task1:
             Dataset = 'Dataset4'
             Pair = ('Camera1', 'Camera2')
             Model = 'Model27'
+        class Filters:
+            k = 10
+            std_multiplier = 1.5
         occupancyLimit = 2 #2
         resolution = 0.25
     class General:
