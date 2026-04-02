@@ -5,7 +5,7 @@ class Task2:
     class Settings:
         pass
     class General:
-        Activation = False
+        Activation = True
         Maker = True
         Destroyer = False
         Version = 0
