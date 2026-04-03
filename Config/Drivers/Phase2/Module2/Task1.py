@@ -11,7 +11,7 @@ class Task1:
             Activation = True
             Threshold = 10.0 
     class General:
-        Activation = True
+        Activation = False
         Maker = True
         Destroyer = False
         Version = 0

@@ -5,29 +5,63 @@ from pathlib import Path
 import h5py
 import pickle
 import json
+from Config import Config
 
 # =============================================================================
 # CONFIGURAZIONE PERCORSI (Da adattare ai tuoi path reali)
 # =============================================================================
 # Cartella dove Task2.py ha salvato i file .pkl (dstRoot nel tuo script)
-RESULTS_DIR = Path("/home/gzosi/Documents/Activities/Ampero/Resources/IOStream/Prop2/Pov1/Kt1/Sigma1/Drivers/Phase3/Module1/Task2") 
+task_conf = Config.Packages.Drivers.Phases.Phase3.Modules.Module1.Tasks.Task2
+main_root = Path(Config.Paths.mainRooot)
+
+RESULTS_DIR = (main_root /
+    Config.Paths.DataRoots.ResourcesRoot /
+    Config.Paths.DataRoots.StreamRoot / 
+    Config.Paths.DataRoots.CaseStudyRoot() /
+    Config.Packages.Drivers.__name__ /
+    Config.Packages.Drivers.Phases.Phase3.__name__ /
+    Config.Packages.Drivers.Phases.Phase3.Modules.Module1.__name__ /
+    task_conf.__name__)
 
 # Percorso al file HDF5 contenente le immagini sorgenti (srcRoot nel tuo script)
-HDF5_PATH = Path("/home/gzosi/Documents/Activities/Ampero/Resources/IOStream/Prop2/Pov1/Kt1/Sigma1/Drivers/Phase0/Module2/Task1/Data.h5")
+HDF5_PATH = (main_root /
+    Config.Paths.DataRoots.ResourcesRoot /
+    Config.Paths.DataRoots.StreamRoot / 
+    Config.Paths.DataRoots.CaseStudyRoot() /
+    Config.Packages.Drivers.__name__ /
+    Config.Packages.Drivers.Phases.Phase0.__name__ /
+    Config.Packages.Drivers.Phases.Phase0.Modules.Module2.__name__ /
+    Config.Packages.Drivers.Phases.Phase0.Modules.Module2.Tasks.Task1.__name__ /
+    Config.Packages.Drivers.Phases.Phase0.Modules.Module2.Tasks.Task1.MetaData.OutputName)
 
 # Percorsi ai JSON per le forme e le origini (necessari per il padding delle immagini originali)
-SHAPES_JSON_PATH = Path('/home/gzosi/Documents/Activities/Ampero/Resources/IOStream/Prop3/Pov1/Kt1/Sigma1/Drivers/Phase0/Module2/Task2/DataShape.json')
-ORIGINS_JSON_PATH = Path('/home/gzosi/Documents/Activities/Ampero/Resources/IOStream/Prop3/Pov1/Kt1/Sigma1/Drivers/Phase0/Module2/Task2/DataOrigin.json')
+SHAPES_JSON_PATH = (main_root /
+    Config.Paths.DataRoots.ResourcesRoot /
+    Config.Paths.DataRoots.StreamRoot /
+    Config.Paths.DataRoots.CaseStudyRoot() /
+    Config.Packages.Drivers.__name__ / 
+    Config.Packages.Drivers.Phases.Phase0.__name__ /
+    Config.Packages.Drivers.Phases.Phase0.Modules.Module2.__name__ /
+    Config.Packages.Drivers.Phases.Phase0.Modules.Module2.Tasks.Task2.__name__ /
+    Config.Packages.Drivers.Phases.Phase0.Modules.Module2.Tasks.Task2.MetaData.ShapeExt)
+ORIGINS_JSON_PATH = (main_root /
+    Config.Paths.DataRoots.ResourcesRoot /
+    Config.Paths.DataRoots.StreamRoot /
+    Config.Paths.DataRoots.CaseStudyRoot() /
+    Config.Packages.Drivers.__name__ / 
+    Config.Packages.Drivers.Phases.Phase0.__name__ /
+    Config.Packages.Drivers.Phases.Phase0.Modules.Module2.__name__ /
+    Config.Packages.Drivers.Phases.Phase0.Modules.Module2.Tasks.Task2.__name__ / 
+    Config.Packages.Drivers.Phases.Phase0.Modules.Module2.Tasks.Task2.MetaData.OriginExt)
+
 
 # Nomi delle videocamere usati come colonne nel DataFrame
 CAMERAS = ['Camera1', 'Camera2'] # Sostituisci con i nomi reali (es. 'sx', 'dx')
-
 # Parametri Visivi
 ALPHA = 0.2          # Trasparenza delle maschere
 DELAY_MS = 500       # Tempo di persistenza a schermo in millisecondi (0.5 sec)
 MAX_SCREEN_W = 1600  # Larghezza massima della finestra sul monitor
 MAX_SCREEN_H = 900   # Altezza massima della finestra sul monitor
-
 # =============================================================================
 # FUNZIONI DI UTILITÀ
 # =============================================================================
@@ -39,7 +73,6 @@ def padOrigin(img, shape, origin):
     x_end = x_start + img.shape[1]
     result[y_start:y_end, x_start:x_end] = img
     return result
-
 def apply_overlay(img_bgr, mask, color, alpha=0.3):
     """Applica una maschera colorata semi-trasparente sopra un'immagine."""
     if mask is None or np.count_nonzero(mask) == 0:
@@ -55,7 +88,6 @@ def apply_overlay(img_bgr, mask, color, alpha=0.3):
     # Applica l'addWeighted solo nelle zone della maschera per non scurire il resto
     blended = np.where(mask_3c, cv2.addWeighted(img_bgr, 1 - alpha, color_layer, alpha, 0), img_bgr)
     return blended
-
 def draw_points(img_bgr, pts, color, radius=3):
     """Disegna i punti (keypoints) sull'immagine."""
     if len(pts) == 0:
@@ -92,8 +124,8 @@ def run_scope():
         with open(ORIGINS_JSON_PATH, 'r') as f:
             origins_dict = json.load(f)
         # Usiamo le stesse chiavi usate sotto per il file HDF5
-        origin1 = origins_dict[CAMERAS[0]]['Database3']['Dataset2']['Foreground']
-        origin2 = origins_dict[CAMERAS[1]]['Database3']['Dataset2']['Foreground']
+        origin1 = origins_dict[CAMERAS[0]]['Database3'][task_conf.Settings.Src.Dataset]['Foreground']
+        origin2 = origins_dict[CAMERAS[1]]['Database3'][task_conf.Settings.Src.Dataset]['Foreground']
     except Exception as e:
         print(f"Attenzione: Impossibile leggere origins.json ({e}). Uso origine (0,0).")
         origin1 = [0, 0]
@@ -102,16 +134,16 @@ def run_scope():
     # 2. Apre il file HDF5 in sola lettura
     try:
         f_h5 = h5py.File(HDF5_PATH, 'r')
-        group1 = f_h5[CAMERAS[0]]['Database3']['Dataset2']['Foreground'] 
-        group2 = f_h5[CAMERAS[1]]['Database3']['Dataset2']['Foreground']
+        group1 = f_h5[CAMERAS[0]]['Database3'][task_conf.Settings.Src.Dataset]['Foreground'] 
+        group2 = f_h5[CAMERAS[1]]['Database3'][task_conf.Settings.Src.Dataset]['Foreground']
     except Exception as e:
         print(f"Attenzione: Impossibile caricare l'HDF5 ({e}). Verranno usati sfondi neri.")
         f_h5, group1, group2 = None, None, None
 
     # 3. Cerca tutti i file generati (Supporta estensione .pkl)
-    pkl_files = sorted(RESULTS_DIR.glob("*.pk"))
+    pkl_files = sorted(RESULTS_DIR.glob("*.pkl"))
     if not pkl_files:
-        print("Nessun file .pk trovato nella cartella specificata.")
+        print("Nessun file .pkl trovato nella cartella specificata.")
         return
 
     paused = False

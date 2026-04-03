@@ -15,7 +15,7 @@ class Task1:
             Model = 'Model27'
         class Syncrony:
             Bounds = [(0, 255)]
-        EpiLimit = 50
+        EpiLimit = 20
         ConfLimit = 0
     class General:
         Activation = True
