@@ -11,8 +11,8 @@ class Task1:
             Pair = ('Camera1', 'Camera2')
             Model = 'Model27'
         class Filters:
-            k = 10
-            std_multiplier = 1.5
+            k = 20
+            std_multiplier = 2.5
         class Volume:
             smooth_sigma = 1.5
             margin_multiplier = 5 # Aumentato leggermente per coprire bene l'impronta sparsa
