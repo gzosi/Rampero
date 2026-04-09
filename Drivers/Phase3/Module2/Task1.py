@@ -6,6 +6,7 @@ import cv2 as cv
 import numpy as np
 from scipy.interpolate import griddata
 from scipy.spatial import cKDTree
+from scipy.ndimage import gaussian_filter, binary_fill_holes
 from tqdm import tqdm
 import pickle
 from termcolor import colored
@@ -51,7 +52,6 @@ def surfaceCarver(masks, calib, pose, occupancyLimit):
             P = calib['K1'] @ np.hstack((np.eye(3), np.zeros((3, 1))))
         else: 
             P = calib['K2'] @ np.hstack((calib['R'], calib['T']))
-            
         if P is None or P.size == 0:
             raise ValueError(f"Missing Matrix P{i+1}")
         uvs = P @ poseH.T
@@ -88,7 +88,6 @@ def validatePoints(pts, refPts):
 def removeOutliers(pts, k=10, std_multiplier=1.5):
     """
     Filtra gli outlier statistici basandosi sulla distanza media dai k-vicini (SOR).
-    I punti isolati avranno una distanza media maggiore e verranno scartati.
     """
     if len(pts) < k + 1:
         return pts
@@ -102,76 +101,115 @@ def removeOutliers(pts, k=10, std_multiplier=1.5):
     if len(filtered_pts) < 6:
         return pts
     return filtered_pts
-def smoothSurface(pts, grid_x, grid_y):
+def generateVolume(upperSurf, lowerSurf, resolution=1.0, smooth_sigma=1.5, margin_multiplier=2.5, taper_px=3.0, min_thickness=0.05, spline_smoothing=0.1):
     """
-    Approssima i punti sparsi con una superficie matematica (quadratica o piana).
-    Questo garantisce una superficie perfettamente liscia, immune ai singoli punti rumorosi.
+    Genera il volume lavorando su isole indipendenti, scartando i punti di controllo 
+    geometricamente rumorosi per impedire avvallamenti anomali.
     """
-    X, Y, Z = pts[:, 0], pts[:, 1], pts[:, 2]
-    if len(pts) >= 6:
-        A = np.c_[X**2, Y**2, X*Y, X, Y, np.ones(X.shape)]
-        C, _, _, _ = np.linalg.lstsq(A, Z, rcond=None)
-        Z_grid = C[0]*grid_x**2 + C[1]*grid_y**2 + C[2]*grid_x*grid_y + C[3]*grid_x + C[4]*grid_y + C[5]
-    else:
-        A = np.c_[X, Y, np.ones(X.shape)]
-        C, _, _, _ = np.linalg.lstsq(A, Z, rcond=None)
-        Z_grid = C[0]*grid_x + C[1]*grid_y + C[2]
-    return Z_grid
-def generateVolume(upperSurf, lowerSurf, resolution=1.0):
-    """
-    Genera il volume calcolato tramite Fit Polinomiale e crea una Voxel Mesh 3D solida.
-    """
-    # Controllo di sicurezza: Qhull (usato in griddata) necessita di almeno 4 punti per la triangolazione
     if len(upperSurf) < 4 or len(lowerSurf) < 4:  
-        print(f"\nAttention: Not enough points for the triangualtion (upper: {len(upperSurf)}, lower: {len(lowerSurf)}). Skip...")
         return 0.0, None, None
-    min_x, max_x = np.min(lowerSurf[:, 0]), np.max(lowerSurf[:, 0])
-    min_y, max_y = np.min(lowerSurf[:, 1]), np.max(lowerSurf[:, 1])
+    pad = resolution * (margin_multiplier + taper_px + 2)
+    min_x, max_x = np.min(lowerSurf[:, 0]) - pad, np.max(lowerSurf[:, 0]) + pad
+    min_y, max_y = np.min(lowerSurf[:, 1]) - pad, np.max(lowerSurf[:, 1]) + pad
     if max_x - min_x < resolution or max_y - min_y < resolution:
         return 0.0, None, None
     grid_x, grid_y = np.mgrid[min_x:max_x:resolution, min_y:max_y:resolution]
-    lower_z_grid = griddata(lowerSurf[:, :2], lowerSurf[:, 2], (grid_x, grid_y), method='linear')
     nx, ny = grid_x.shape
-    mask_2d = np.zeros((nx, ny), dtype=np.uint8)
-    idx_x = np.clip(np.round((lowerSurf[:, 0] - min_x) / resolution).astype(int), 0, nx - 1)
-    idx_y = np.clip(np.round((lowerSurf[:, 1] - min_y) / resolution).astype(int), 0, ny - 1)
-    mask_2d[idx_x, idx_y] = 255
+    lower_z_lin = griddata(lowerSurf[:, :2], lowerSurf[:, 2], (grid_x, grid_y), method='linear')
+    lower_z_near = griddata(lowerSurf[:, :2], lowerSurf[:, 2], (grid_x, grid_y), method='nearest')
+    lower_z_grid = np.where(np.isnan(lower_z_lin), lower_z_near, lower_z_lin)
     tree = cKDTree(lowerSurf[:, :2])
-    dists, _ = tree.query(lowerSurf[:, :2], k=2)
-    typical_spacing = np.percentile(dists[:, 1], 95)
-    pixel_spacing = int(np.ceil(typical_spacing / resolution))
-    k_size = max(3, pixel_spacing * 2 + 1)
-    k_size = min(k_size, 31)
-    kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, (k_size, k_size))
-    mask_closed = cv.morphologyEx(mask_2d, cv.MORPH_CLOSE, kernel)
-    contours, _ = cv.findContours(mask_closed, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
-    valid_mask = np.zeros((nx, ny), dtype=bool)
-    if contours:
-        largest_contour = max(contours, key=cv.contourArea)
-        mask_filled = np.zeros((nx, ny), dtype=np.uint8)
-        cv.drawContours(mask_filled, [largest_contour], -1, 255, thickness=cv.FILLED)
-        valid_mask = mask_filled > 0
-    valid_mask = valid_mask & ~np.isnan(lower_z_grid)
-    upper_z_grid = smoothSurface(upperSurf, grid_x, grid_y)
-    height_diff = np.abs(upper_z_grid[valid_mask] - lower_z_grid[valid_mask])
+    grid_pts_2d = np.column_stack((grid_x.ravel(), grid_y.ravel()))
+    dists, _ = tree.query(grid_pts_2d)
+    valid_mask_global = (dists.reshape(nx, ny) <= resolution * margin_multiplier)
+    valid_mask_global = binary_fill_holes(valid_mask_global)
+    if not np.any(valid_mask_global):
+        return 0.0, None, None
+    mask_uint8_global = (valid_mask_global * 255).astype(np.uint8)
+    num_labels, labels = cv.connectedComponents(mask_uint8_global)
+    dz_final_global = np.zeros_like(lower_z_grid)
+    idx_x_up_all = np.clip(np.round((upperSurf[:, 0] - min_x) / resolution).astype(int), 0, nx - 1)
+    idx_y_up_all = np.clip(np.round((upperSurf[:, 1] - min_y) / resolution).astype(int), 0, ny - 1)
+    base_z_for_all_upper = lower_z_grid[idx_x_up_all, idx_y_up_all]
+    global_dz = upperSurf[:, 2] - base_z_for_all_upper
+    direction = 1 if np.nanmean(global_dz) >= 0 else -1
+    for label in range(1, num_labels):
+        loc_mask = (labels == label)
+        kernel_dilate = cv.getStructuringElement(cv.MORPH_ELLIPSE, (5, 5))
+        loc_mask_dilated = cv.dilate(loc_mask.astype(np.uint8), kernel_dilate) > 0
+        island_pts_mask = loc_mask_dilated[idx_x_up_all, idx_y_up_all]
+        upper_island = upperSurf[island_pts_mask]
+        if len(upper_island) < 1:
+            continue
+        island_idx_x = idx_x_up_all[island_pts_mask]
+        island_idx_y = idx_y_up_all[island_pts_mask]
+        base_z_isl = lower_z_grid[island_idx_x, island_idx_y]
+        dz_raw = upper_island[:, 2] - base_z_isl
+        if direction == 1:
+            valid_ctrl = dz_raw >= min_thickness
+        else:
+            valid_ctrl = dz_raw <= -min_thickness
+        if np.sum(valid_ctrl) >= 3:
+            upper_island = upper_island[valid_ctrl]
+            dz_raw = dz_raw[valid_ctrl]
+        else:
+            if direction == 1:
+                dz_raw = np.clip(dz_raw, min_thickness, None)
+            else:
+                dz_raw = np.clip(dz_raw, None, -min_thickness)
+        if len(upper_island) > 500:
+            idx_sub = np.random.choice(len(upper_island), 500, replace=False)
+            upper_island = upper_island[idx_sub]
+            dz_raw = dz_raw[idx_sub]
+        xs, ys = np.where(loc_mask)
+        pad_loc = int(taper_px + 5)
+        x0, x1 = max(0, np.min(xs) - pad_loc), min(nx, np.max(xs) + pad_loc + 1)
+        y0, y1 = max(0, np.min(ys) - pad_loc), min(ny, np.max(ys) + pad_loc + 1)
+        crop_grid_x = grid_x[x0:x1, y0:y1]
+        crop_grid_y = grid_y[x0:x1, y0:y1]
+        crop_loc_mask = loc_mask[x0:x1, y0:y1]
+        train_pts = upper_island[:, :2]
+        if len(train_pts) >= 4:
+            dz_lin = griddata(train_pts, dz_raw, (crop_grid_x, crop_grid_y), method='linear')
+            dz_near = griddata(train_pts, dz_raw, (crop_grid_x, crop_grid_y), method='nearest')
+            dz_extrap = np.where(np.isnan(dz_lin), dz_near, dz_lin)
+        else:
+            dz_extrap = np.full_like(crop_grid_x, np.mean(dz_raw))
+        effective_sigma = smooth_sigma * (1.0 + spline_smoothing * 5.0)
+        if effective_sigma > 0:
+            dz_extrap = gaussian_filter(dz_extrap, sigma=effective_sigma)
+        if direction == 1:
+            dz_extrap = np.clip(dz_extrap, min_thickness, None)
+        else:
+            dz_extrap = np.clip(dz_extrap, None, -min_thickness)
+        crop_mask_uint8 = (crop_loc_mask * 255).astype(np.uint8)
+        dist_tf = cv.distanceTransform(crop_mask_uint8, cv.DIST_L2, 5)
+        t_linear = np.clip(dist_tf / max(1.0, taper_px), 0.0, 1.0)
+        t_weight = t_linear * t_linear * t_linear * (t_linear * (t_linear * 6.0 - 15.0) + 10.0)
+        dz_cropped_final = dz_extrap * t_weight
+        dz_final_global[x0:x1, y0:y1] = np.where(crop_loc_mask, dz_cropped_final, dz_final_global[x0:x1, y0:y1])
+    upper_z_grid = lower_z_grid + dz_final_global
+    height_diff = np.abs(upper_z_grid[valid_mask_global] - lower_z_grid[valid_mask_global])
     cell_area = resolution ** 2
     volume = np.sum(height_diff) * cell_area
-    valid_x = grid_x[valid_mask]
-    valid_y = grid_y[valid_mask]
-    valid_z = upper_z_grid[valid_mask]
+    valid_x = grid_x[valid_mask_global]
+    valid_y = grid_y[valid_mask_global]
+    valid_z = upper_z_grid[valid_mask_global]
     upper_surface_pts = np.column_stack((valid_x, valid_y, valid_z))
-    safe_lower_z = np.where(valid_mask, lower_z_grid, upper_z_grid)
+    mean_lower_z = np.nanmean(lower_z_grid)
+    lower_z_safe = np.where(np.isnan(lower_z_grid), mean_lower_z, lower_z_grid)
+    safe_lower_z_mesh = np.where(valid_mask_global, lower_z_grid, lower_z_safe)
+    safe_upper_z_mesh = np.where(valid_mask_global, upper_z_grid, lower_z_safe)
     X_mesh = np.dstack((grid_x, grid_x))
     Y_mesh = np.dstack((grid_y, grid_y))
-    Z_mesh = np.dstack((safe_lower_z, upper_z_grid))
+    Z_mesh = np.dstack((safe_lower_z_mesh, safe_upper_z_mesh))
     grid = pv.StructuredGrid()
-    nx, ny = grid_x.shape
     grid.dimensions = (nx, ny, 2) 
     grid.points = np.column_stack((
         X_mesh.ravel('F'),
         Y_mesh.ravel('F'),
         Z_mesh.ravel('F')))
-    valid_3d = np.dstack((valid_mask, valid_mask))
+    valid_3d = np.dstack((valid_mask_global, valid_mask_global))
     grid.point_data['valid_area'] = valid_3d.ravel('F').astype(int)
     volume_mesh = grid.threshold(0.5, scalars='valid_area')
     return volume, volume_mesh, upper_surface_pts
@@ -183,8 +221,24 @@ def dataCollector(masks, pts, calib, pose, areas, settings):
     valid3d = removeOutliers(valid3d, k=settings.Filters.k, std_multiplier=settings.Filters.std_multiplier)
     id, inPts = surfaceCarver([mask1, mask2], calib, pose, settings.occupancyLimit)
     area = sum(areas[id]) 
-    volume, mesh, exPts = generateVolume(valid3d, inPts, settings.resolution)
+    if hasattr(settings, 'Volume'):
+        sigma_val = getattr(settings.Volume, 'smooth_sigma', 1.5)
+        margin_val = getattr(settings.Volume, 'margin_multiplier', 2.5)
+        taper_val = getattr(settings.Volume, 'taper_px', 3.0)
+        min_thick_val = getattr(settings.Volume, 'min_thickness', 0.05)
+        spline_val = getattr(settings.Volume, 'spline_smoothing', 0.1)
+    else:
+        sigma_val = 1.5
+        margin_val = 2.5
+        taper_val = 3.0
+        min_thick_val = 0.05
+        spline_val = 0.1
+    volume, mesh, exPts = generateVolume(
+        valid3d, inPts, settings.resolution, 
+        smooth_sigma=sigma_val, margin_multiplier=margin_val, 
+        taper_px=taper_val, min_thickness=min_thick_val, spline_smoothing=spline_val)
     return [inPts, exPts, valid3d, mesh, area, volume]
+
 #%% Defining Main Function
 def main(Config):       
     task_conf = Config.Packages.Drivers.Phases.Phase3.Modules.Module2.Tasks.Task1
