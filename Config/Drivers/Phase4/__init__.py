@@ -7,5 +7,5 @@ class Phase4:
         Module1 = Module1
         Module2 = Module2
     class General:
-        Activation = False
+        Activation = True
         Version = 0
