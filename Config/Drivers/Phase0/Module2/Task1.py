@@ -12,7 +12,7 @@ class Task1:
             # cv.ROTATE_90_CLOCKWISE, cv.ROTATE_180, cv.ROTATE_90_COUNTERCLOCKWISE 
         class Resync:
             class Database2:
-                Dataset1 = 63
+                Dataset1 = 75
             class Database3: 
                 class Dataset1:
                     Background = 28
